@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>健身房區域環境巡檢系統｜多區分頁即時同步</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", sans-serif;
+      background-color: #f8fafc;
+      color: #0f172a;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="min-h-screen pb-20">
+  <!-- Top Sticky Header -->
+  <header class="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-sm">
+    <div class="max-w-4xl mx-auto px-3 py-2.5 space-y-2">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <div class="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-sm font-bold shadow-xs shrink-0">
+            區
+          </div>
+          <div class="min-w-0">
+            <h1 class="text-sm sm:text-base font-bold text-slate-900 truncate">健身房區域環境巡檢系統</h1>
+            <div class="flex items-center gap-1.5 text-[11px] text-slate-500">
+              <span id="syncDot" class="inline-block w-2 h-2 rounded-full bg-amber-400"></span>
+              <span id="syncStatus">正在初始化...</span>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button id="exportCsvBtn" type="button" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-2xs transition">
+            ↓ 匯出 CSV
+          </button>
+        </div>
+      </div>
+
+      <!-- Date & Inspector Controls -->
+      <div class="grid grid-cols-2 gap-1.5">
+        <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+          <label for="dateInput" class="text-[11px] font-semibold text-slate-600 shrink-0">日期</label>
+          <input id="dateInput" type="date" class="w-full bg-transparent text-xs font-medium text-slate-800 focus:outline-none" />
+        </div>
+        <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+          <label for="inspectorInput" class="text-[11px] font-semibold text-slate-600 shrink-0">人員</label>
+          <input id="inspectorInput" type="text" placeholder="巡檢人員姓名..." class="w-full bg-transparent text-xs text-slate-800 focus:outline-none" />
+        </div>
+      </div>
+
+      <!-- Overall & Current Tab Summary Bar -->
+      <div class="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1.5 text-xs">
+        <div class="flex items-center gap-2.5">
+          <span>全館：<strong id="overallProgress" class="text-emerald-700">0 / 207</strong></span>
+          <span>本頁：<strong id="tabProgress" class="text-slate-800">0 / 0</strong></span>
+        </div>
+        <div class="flex items-center gap-2.5">
+          <span class="text-rose-600 font-semibold">異常：<strong id="issueCount">0</strong> 項</span>
+          <span id="lastUpdated" class="text-[11px] text-slate-400">尚未更新</span>
+        </div>
+      </div>
+
+      <!-- Area Tabs -->
+      <div id="tabBar" class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5"></div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="max-w-4xl mx-auto px-3 pt-3 space-y-2">
+    <!-- Filter & Quick Actions -->
+    <div class="bg-white border border-slate-200 rounded-xl p-2 flex flex-wrap items-center justify-between gap-1.5 shadow-2xs">
+      <div class="flex items-center gap-1.5 flex-1 min-w-[170px]">
+        <input id="searchInput" type="text" placeholder="搜尋種類或細項..." class="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs focus:outline-none focus:border-emerald-500" />
+      </div>
+      <div class="flex items-center gap-1.5">
+        <button id="onlyIssueBtn" type="button" class="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition">
+          只看異常
+        </button>
+        <button id="checkAllTabBtn" type="button" class="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-semibold transition">
+          本頁全打 V
+        </button>
+        <button id="clearTabBtn" type="button" class="px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 text-xs font-semibold transition">
+          清除本頁
+        </button>
+      </div>
+    </div>
+
+    <!-- Compact Checklist Items Container -->
+    <div id="itemsContainer" class="space-y-1.5"></div>
+  </main>
+
+  <!-- Toast -->
+  <div id="toastBox" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg opacity-0 pointer-events-none transition-opacity duration-200 whitespace-nowrap">
+    提示訊息
+  </div>
+
+  <!-- Firebase Config Placeholder (請填入與 gym-inspection 相同的 firebaseConfig) -->
+  <script>
+  const firebaseConfig = {
+  apiKey: "AIzaSyB6sL2VRxoizIbbLqX0hrx3G0YZQyKRTBs",
+  authDomain: "gym-inspection.firebaseapp.com",
+  databaseURL: "https://gym-inspection-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "gym-inspection",
+  storageBucket: "gym-inspection.firebasestorage.app",
+  messagingSenderId: "492275565622",
+  appId: "1:492275565622:web:f8683fbd8e9e26b2de0497",
+  measurementId: "G-X4BTF7CZ4X"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+  </script>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const APP_ID = "gym-area-inspection";
+
+    const TABS = [
+      "全部區域",
+      "自由訓練區",
+      "草皮區+天井",
+      "櫃台區+一樓大門",
+      "重訓區",
+      "飛輪教室",
+      "心肺區",
+      "全外場",
+      "有氧教室"
+    ];
+
+    const CHECKLIST_ITEMS = [{"id": "自由訓練區_01", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "草皮", "item": "無掀起"}, {"id": "自由訓練區_02", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "草皮", "item": "無染色"}, {"id": "自由訓練區_03", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "草皮", "item": "無污漬"}, {"id": "自由訓練區_04", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "沙袋區", "item": "鐵橋無鏽蝕或掉漆"}, {"id": "自由訓練區_05", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "沙袋區", "item": "鐵鍊無生鏽"}, {"id": "自由訓練區_06", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "沙袋區", "item": "外觀整潔無積塵"}, {"id": "自由訓練區_07", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "燈條", "item": "無灰塵"}, {"id": "自由訓練區_08", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "電鍍板", "item": "無翹起或破損"}, {"id": "自由訓練區_09", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "管線", "item": "乾淨無積塵"}, {"id": "自由訓練區_10", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "鏡子", "item": "無水漬"}, {"id": "自由訓練區_11", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "鏡子", "item": "灰塵"}, {"id": "自由訓練區_12", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "鏡子", "item": "無手印"}, {"id": "自由訓練區_13", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "器材", "item": "瑜珈墊收好捲好"}, {"id": "自由訓練區_14", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "器材", "item": "壺鈴歸位完成並按照重量"}, {"id": "自由訓練區_15", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "器材", "item": "槓片歸位完成"}, {"id": "自由訓練區_16", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "器材", "item": "雪橇車歸位"}, {"id": "自由訓練區_17", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "器材", "item": "藥球歸位完成上面無灰塵"}, {"id": "自由訓練區_18", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "器材", "item": "戰繩捲好並歸位"}, {"id": "自由訓練區_19", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "器材", "item": "瑜珈球歸位"}, {"id": "自由訓練區_20", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "公告 海報", "item": "壓克力是否乾淨"}, {"id": "自由訓練區_21", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "公告 海報", "item": "是否破損"}, {"id": "自由訓練區_22", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "公告 海報", "item": "公告是否毀損"}, {"id": "自由訓練區_23", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "電燈", "item": "電燈亮度正常"}, {"id": "自由訓練區_24", "tab": "自由訓練區", "area": "一樓自由訓練區", "category": "安全門", "item": "安全門是否乾淨無汙漬"}, {"id": "草皮區+天井_01", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "天井", "item": "無漏水"}, {"id": "草皮區+天井_02", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "天井", "item": "上方X型柱無積塵"}, {"id": "草皮區+天井_03", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "天井", "item": "黑色立柱無灰塵"}, {"id": "草皮區+天井_04", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "草皮", "item": "無掀起"}, {"id": "草皮區+天井_05", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "草皮", "item": "無染色"}, {"id": "草皮區+天井_06", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "草皮", "item": "無污漬"}, {"id": "草皮區+天井_07", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "燈條", "item": "亮度正常無異常"}, {"id": "草皮區+天井_08", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "電鍍板", "item": "無翹起或破損"}, {"id": "草皮區+天井_09", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "藥球", "item": "無破損或破裂"}, {"id": "草皮區+天井_10", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "鏡子", "item": "無水漬"}, {"id": "草皮區+天井_11", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "鏡子", "item": "灰塵"}, {"id": "草皮區+天井_12", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "鏡子", "item": "無手印"}, {"id": "草皮區+天井_13", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "器材", "item": "瑜珈墊收好捲好"}, {"id": "草皮區+天井_14", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "器材", "item": "壺鈴歸位完成並按照重量"}, {"id": "草皮區+天井_15", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "器材", "item": "槓片歸位完成"}, {"id": "草皮區+天井_16", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "器材", "item": "雪橇車歸位"}, {"id": "草皮區+天井_17", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "器材", "item": "藥球歸位完成上面無灰塵"}, {"id": "草皮區+天井_18", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "器材", "item": "戰繩捲好並歸位"}, {"id": "草皮區+天井_19", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "器材", "item": "輪胎機上無污漬"}, {"id": "草皮區+天井_20", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "器材", "item": "瑜珈球歸位"}, {"id": "草皮區+天井_21", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "投射燈", "item": "電燈亮度正常"}, {"id": "草皮區+天井_22", "tab": "草皮區+天井", "area": "草皮區+天井", "category": "筒燈", "item": "電燈亮度正常"}, {"id": "櫃台區+一樓大門_01", "tab": "櫃台區+一樓大門", "area": "櫃台區", "category": "地毯", "item": "無灰塵"}, {"id": "櫃台區+一樓大門_02", "tab": "櫃台區+一樓大門", "area": "櫃台區", "category": "地毯", "item": "無污漬"}, {"id": "櫃台區+一樓大門_03", "tab": "櫃台區+一樓大門", "area": "櫃台區", "category": "玻璃", "item": "無水漬"}, {"id": "櫃台區+一樓大門_04", "tab": "櫃台區+一樓大門", "area": "櫃台區", "category": "玻璃", "item": "灰塵"}, {"id": "櫃台區+一樓大門_05", "tab": "櫃台區+一樓大門", "area": "櫃台區", "category": "玻璃", "item": "無手印"}, {"id": "櫃台區+一樓大門_06", "tab": "櫃台區+一樓大門", "area": "櫃台區", "category": "管線", "item": "無灰塵"}, {"id": "櫃台區+一樓大門_07", "tab": "櫃台區+一樓大門", "area": "櫃台區", "category": "通風口", "item": "外觀無積塵、乾淨"}, {"id": "櫃台區+一樓大門_08", "tab": "櫃台區+一樓大門", "area": "櫃台區", "category": "電燈", "item": "電燈亮度正常"}, {"id": "櫃台區+一樓大門_09", "tab": "櫃台區+一樓大門", "area": "櫃台區", "category": "桌子", "item": "擦拭過且乾淨"}, {"id": "櫃台區+一樓大門_10", "tab": "櫃台區+一樓大門", "area": "櫃台區", "category": "扶手", "item": "扶手白鐵是否有污垢"}, {"id": "櫃台區+一樓大門_11", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "PVC", "item": "無灰塵"}, {"id": "櫃台區+一樓大門_12", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "PVC", "item": "無污漬"}, {"id": "櫃台區+一樓大門_13", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "玻璃", "item": "無水漬"}, {"id": "櫃台區+一樓大門_14", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "玻璃", "item": "灰塵"}, {"id": "櫃台區+一樓大門_15", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "玻璃", "item": "無手印"}, {"id": "櫃台區+一樓大門_16", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "雨傘架", "item": "乾淨無污漬"}, {"id": "櫃台區+一樓大門_17", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "雨傘架", "item": "雨傘收好歸位"}, {"id": "櫃台區+一樓大門_18", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "安全帽架", "item": "乾淨無污漬"}, {"id": "櫃台區+一樓大門_19", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "安全帽架", "item": "安全帽收好歸位"}, {"id": "櫃台區+一樓大門_20", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "雨衣架", "item": "乾淨無污漬"}, {"id": "櫃台區+一樓大門_21", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "雨衣架", "item": "雨衣.衣架收好歸位"}, {"id": "櫃台區+一樓大門_22", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "大門口", "item": "外觀無積塵、乾淨"}, {"id": "櫃台區+一樓大門_23", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "電燈", "item": "電燈亮度正常"}, {"id": "櫃台區+一樓大門_24", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "通風口", "item": "是否有灰塵"}, {"id": "櫃台區+一樓大門_25", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "天花板", "item": "格柵是否有灰塵"}, {"id": "櫃台區+一樓大門_26", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "電梯", "item": "電梯是否乾淨無汙漬"}, {"id": "櫃台區+一樓大門_27", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "樓梯", "item": "樓梯是否乾淨無汙漬"}, {"id": "櫃台區+一樓大門_28", "tab": "櫃台區+一樓大門", "area": "一樓大門", "category": "把手", "item": "把手白鐵是否有污垢"}, {"id": "重訓區_01", "tab": "重訓區", "area": "重訓區", "category": "啞鈴區 地板", "item": "無灰塵"}, {"id": "重訓區_02", "tab": "重訓區", "area": "重訓區", "category": "啞鈴區 地板", "item": "有拖地"}, {"id": "重訓區_03", "tab": "重訓區", "area": "重訓區", "category": "啞鈴區 地板", "item": "地板不濕滑"}, {"id": "重訓區_04", "tab": "重訓區", "area": "重訓區", "category": "地板", "item": "無灰塵"}, {"id": "重訓區_05", "tab": "重訓區", "area": "重訓區", "category": "地板", "item": "地板不濕滑"}, {"id": "重訓區_06", "tab": "重訓區", "area": "重訓區", "category": "啞鈴區 燈條", "item": "上方無積塵"}, {"id": "重訓區_07", "tab": "重訓區", "area": "重訓區", "category": "啞鈴區 燈條", "item": "可正常使用"}, {"id": "重訓區_08", "tab": "重訓區", "area": "重訓區", "category": "啞鈴區 燈條", "item": "電燈亮度正常"}, {"id": "重訓區_09", "tab": "重訓區", "area": "重訓區", "category": "燈條", "item": "上方無積塵"}, {"id": "重訓區_10", "tab": "重訓區", "area": "重訓區", "category": "公告 海報", "item": "是否在期限內"}, {"id": "重訓區_11", "tab": "重訓區", "area": "重訓區", "category": "公告 海報", "item": "是否破損"}, {"id": "重訓區_12", "tab": "重訓區", "area": "重訓區", "category": "飲水機", "item": "鐵盤上乾淨無垃圾或汙穢物"}, {"id": "重訓區_13", "tab": "重訓區", "area": "重訓區", "category": "飲水機", "item": "外面無貼貼紙或膠帶"}, {"id": "重訓區_14", "tab": "重訓區", "area": "重訓區", "category": "飲水機", "item": "飲水機無積水"}, {"id": "重訓區_15", "tab": "重訓區", "area": "重訓區", "category": "蓋板", "item": "火災按鍵蓋板上無灰塵"}, {"id": "重訓區_16", "tab": "重訓區", "area": "重訓區", "category": "酒精機", "item": "酒精可使用"}, {"id": "重訓區_17", "tab": "重訓區", "area": "重訓區", "category": "啞鈴區", "item": "啞鈴架無積塵或掉漆"}, {"id": "重訓區_18", "tab": "重訓區", "area": "重訓區", "category": "啞鈴區", "item": "啞鈴擺放整齊"}, {"id": "重訓區_19", "tab": "重訓區", "area": "重訓區", "category": "通風口", "item": "外觀無積塵、乾淨"}, {"id": "重訓區_20", "tab": "重訓區", "area": "重訓區", "category": "牆壁", "item": "無灰塵及汙漬"}, {"id": "重訓區_21", "tab": "重訓區", "area": "重訓區", "category": "看板", "item": "看板無灰塵且乾淨"}, {"id": "重訓區_22", "tab": "重訓區", "area": "重訓區", "category": "垃圾桶", "item": "乾淨無污漬"}, {"id": "重訓區_23", "tab": "重訓區", "area": "重訓區", "category": "招牌", "item": "是否有灰塵"}, {"id": "重訓區_24", "tab": "重訓區", "area": "重訓區", "category": "管線", "item": "是否有灰塵"}, {"id": "重訓區_25", "tab": "重訓區", "area": "重訓區", "category": "滴水盤", "item": "滴水盤是否乾淨"}, {"id": "重訓區_26", "tab": "重訓區", "area": "重訓區", "category": "喇叭", "item": "上方無積塵"}, {"id": "飛輪教室_01", "tab": "飛輪教室", "area": "飛輪教室", "category": "地板", "item": "無灰塵"}, {"id": "飛輪教室_02", "tab": "飛輪教室", "area": "飛輪教室", "category": "地板", "item": "有拖地"}, {"id": "飛輪教室_03", "tab": "飛輪教室", "area": "飛輪教室", "category": "地板", "item": "地板不濕滑"}, {"id": "飛輪教室_04", "tab": "飛輪教室", "area": "飛輪教室", "category": "鏡子", "item": "無水漬"}, {"id": "飛輪教室_05", "tab": "飛輪教室", "area": "飛輪教室", "category": "鏡子", "item": "灰塵"}, {"id": "飛輪教室_06", "tab": "飛輪教室", "area": "飛輪教室", "category": "鏡子", "item": "無手印"}, {"id": "飛輪教室_07", "tab": "飛輪教室", "area": "飛輪教室", "category": "燈條", "item": "上方無積塵"}, {"id": "飛輪教室_08", "tab": "飛輪教室", "area": "飛輪教室", "category": "公告 海報", "item": "是否在期限內"}, {"id": "飛輪教室_09", "tab": "飛輪教室", "area": "飛輪教室", "category": "公告 海報", "item": "是否破損"}, {"id": "飛輪教室_10", "tab": "飛輪教室", "area": "飛輪教室", "category": "通風口", "item": "外觀無積塵、乾淨"}, {"id": "飛輪教室_11", "tab": "飛輪教室", "area": "飛輪教室", "category": "牆壁", "item": "無灰塵及汙漬"}, {"id": "飛輪教室_12", "tab": "飛輪教室", "area": "飛輪教室", "category": "天花板", "item": "管線是否有灰塵"}, {"id": "飛輪教室_13", "tab": "飛輪教室", "area": "飛輪教室", "category": "喇叭", "item": "上方無積塵"}, {"id": "飛輪教室_14", "tab": "飛輪教室", "area": "飛輪教室", "category": "投影幕", "item": "外觀無破損"}, {"id": "飛輪教室_15", "tab": "飛輪教室", "area": "飛輪教室", "category": "門口", "item": "把手無積塵鏡面乾淨"}, {"id": "飛輪教室_16", "tab": "飛輪教室", "area": "飛輪教室", "category": "插座", "item": "是否貼上220V貼紙"}, {"id": "心肺區_01", "tab": "心肺區", "area": "心肺區", "category": "地板", "item": "無灰塵"}, {"id": "心肺區_02", "tab": "心肺區", "area": "心肺區", "category": "地板", "item": "地板不濕滑"}, {"id": "心肺區_03", "tab": "心肺區", "area": "心肺區", "category": "燈條", "item": "上方無積塵"}, {"id": "心肺區_04", "tab": "心肺區", "area": "心肺區", "category": "器材", "item": "飲料杯架是否乾淨無垃圾"}, {"id": "心肺區_05", "tab": "心肺區", "area": "心肺區", "category": "器材", "item": "鳳梨頭有無接好"}, {"id": "心肺區_06", "tab": "心肺區", "area": "心肺區", "category": "器材", "item": "廣告是否貼好"}, {"id": "心肺區_07", "tab": "心肺區", "area": "心肺區", "category": "器材", "item": "器材上是否有積灰"}, {"id": "心肺區_08", "tab": "心肺區", "area": "心肺區", "category": "器材", "item": "跑步機跑道兩邊是否有汗漬"}, {"id": "心肺區_09", "tab": "心肺區", "area": "心肺區", "category": "公告 海報", "item": "是否在期限內"}, {"id": "心肺區_10", "tab": "心肺區", "area": "心肺區", "category": "公告 海報", "item": "是否破損"}, {"id": "心肺區_11", "tab": "心肺區", "area": "心肺區", "category": "酒精機", "item": "酒精可使用"}, {"id": "心肺區_12", "tab": "心肺區", "area": "心肺區", "category": "通風口", "item": "外觀無積塵、乾淨"}, {"id": "心肺區_13", "tab": "心肺區", "area": "心肺區", "category": "牆壁", "item": "無灰塵及汙漬"}, {"id": "心肺區_14", "tab": "心肺區", "area": "心肺區", "category": "蓋板", "item": "心肺區插座蓋板有無凹陷"}, {"id": "心肺區_15", "tab": "心肺區", "area": "心肺區", "category": "蓋板", "item": "火災按鍵蓋板上無灰塵"}, {"id": "心肺區_16", "tab": "心肺區", "area": "心肺區", "category": "飲水機", "item": "鐵盤上乾淨無垃圾或汙穢物"}, {"id": "心肺區_17", "tab": "心肺區", "area": "心肺區", "category": "飲水機", "item": "飲水機無積水"}, {"id": "心肺區_18", "tab": "心肺區", "area": "心肺區", "category": "看板", "item": "看板無灰塵且乾淨"}, {"id": "心肺區_19", "tab": "心肺區", "area": "心肺區", "category": "垃圾桶", "item": "乾淨無污漬"}, {"id": "心肺區_20", "tab": "心肺區", "area": "心肺區", "category": "管線", "item": "是否有灰塵"}, {"id": "心肺區_21", "tab": "心肺區", "area": "心肺區", "category": "撒水盤", "item": "撒水盤是否乾淨"}, {"id": "心肺區_22", "tab": "心肺區", "area": "心肺區", "category": "三角鐵", "item": "是否擦拭乾淨"}, {"id": "心肺區_23", "tab": "心肺區", "area": "心肺區", "category": "喇叭", "item": "上方無積塵"}, {"id": "心肺區_24", "tab": "心肺區", "area": "心肺區", "category": "插座", "item": "是否凹陷"}, {"id": "心肺區_25", "tab": "心肺區", "area": "心肺區", "category": "插座", "item": "是否貼上220V貼紙"}, {"id": "全外場_01", "tab": "全外場", "area": "", "category": "電視", "item": "共計7台無灰塵"}, {"id": "全外場_02", "tab": "全外場", "area": "", "category": "安全門 有無擦拭", "item": "六道花園房"}, {"id": "全外場_03", "tab": "全外場", "area": "", "category": "安全門 有無擦拭", "item": "備品室"}, {"id": "全外場_04", "tab": "全外場", "area": "", "category": "安全門 有無擦拭", "item": "大伸展區"}, {"id": "全外場_05", "tab": "全外場", "area": "", "category": "安全門 有無擦拭", "item": "筋膜放鬆教室"}, {"id": "全外場_06", "tab": "全外場", "area": "", "category": "安全門 有無擦拭", "item": "心肺區後面"}, {"id": "全外場_07", "tab": "全外場", "area": "", "category": "安全門 有無擦拭", "item": "教練櫃台旁"}, {"id": "全外場_08", "tab": "全外場", "area": "", "category": "安全門 有無擦拭", "item": "外場男賓旁"}, {"id": "全外場_09", "tab": "全外場", "area": "", "category": "安全門 有無擦拭", "item": "飛輪教室對面"}, {"id": "全外場_10", "tab": "全外場", "area": "", "category": "安全門 有無擦拭", "item": "客服櫃台前方"}, {"id": "全外場_11", "tab": "全外場", "area": "", "category": "安全門 有無擦拭", "item": "車道倉庫"}, {"id": "全外場_12", "tab": "全外場", "area": "", "category": "安全門 有無擦拭", "item": "冰水主機"}, {"id": "全外場_13", "tab": "全外場", "area": "", "category": "安全門 有無擦拭", "item": "ST水塔房"}, {"id": "全外場_14", "tab": "全外場", "area": "小伸展區", "category": "地毯", "item": "無灰塵"}, {"id": "全外場_15", "tab": "全外場", "area": "小伸展區", "category": "地毯", "item": "無污漬"}, {"id": "全外場_16", "tab": "全外場", "area": "小伸展區", "category": "玻璃", "item": "無水漬"}, {"id": "全外場_17", "tab": "全外場", "area": "小伸展區", "category": "玻璃", "item": "灰塵"}, {"id": "全外場_18", "tab": "全外場", "area": "小伸展區", "category": "玻璃", "item": "無手印"}, {"id": "全外場_19", "tab": "全外場", "area": "小伸展區", "category": "器材", "item": "瑜珈墊收好捲好"}, {"id": "全外場_20", "tab": "全外場", "area": "小伸展區", "category": "通風口", "item": "外觀無積塵、乾淨"}, {"id": "全外場_21", "tab": "全外場", "area": "小伸展區", "category": "電燈", "item": "電燈亮度正常"}, {"id": "全外場_22", "tab": "全外場", "area": "小伸展區", "category": "天花板", "item": "是否有灰塵"}, {"id": "全外場_23", "tab": "全外場", "area": "小伸展區", "category": "扶手", "item": "扶手白鐵是否有污垢"}, {"id": "全外場_24", "tab": "全外場", "area": "大伸展區", "category": "地毯", "item": "無灰塵"}, {"id": "全外場_25", "tab": "全外場", "area": "大伸展區", "category": "地毯", "item": "無污漬"}, {"id": "全外場_26", "tab": "全外場", "area": "大伸展區", "category": "玻璃", "item": "無水漬"}, {"id": "全外場_27", "tab": "全外場", "area": "大伸展區", "category": "玻璃", "item": "灰塵"}, {"id": "全外場_28", "tab": "全外場", "area": "大伸展區", "category": "玻璃", "item": "無手印"}, {"id": "全外場_29", "tab": "全外場", "area": "大伸展區", "category": "器材", "item": "瑜珈墊收好捲好"}, {"id": "全外場_30", "tab": "全外場", "area": "大伸展區", "category": "通風口", "item": "外觀無積塵、乾淨"}, {"id": "全外場_31", "tab": "全外場", "area": "大伸展區", "category": "酒精機", "item": "上方是否積塵"}, {"id": "全外場_32", "tab": "全外場", "area": "大伸展區", "category": "酒精機", "item": "可否正常使用"}, {"id": "全外場_33", "tab": "全外場", "area": "大伸展區", "category": "電燈", "item": "電燈亮度正常"}, {"id": "全外場_34", "tab": "全外場", "area": "大伸展區", "category": "天花板", "item": "是否有灰塵"}, {"id": "全外場_35", "tab": "全外場", "area": "大伸展區", "category": "扶手", "item": "扶手白鐵是否有污垢"}, {"id": "全外場_36", "tab": "全外場", "area": "洽談區", "category": "客服洽談", "item": "洽談椅無破裂且乾淨"}, {"id": "全外場_37", "tab": "全外場", "area": "洽談區", "category": "客服洽談", "item": "桌面乾淨"}, {"id": "全外場_38", "tab": "全外場", "area": "洽談區", "category": "客服洽談", "item": "牆面乾淨無積塵"}, {"id": "全外場_39", "tab": "全外場", "area": "洽談區", "category": "客服洽談", "item": "電腦後方無積塵"}, {"id": "全外場_40", "tab": "全外場", "area": "洽談區", "category": "客服洽談", "item": "地板乾淨無灰塵"}, {"id": "全外場_41", "tab": "全外場", "area": "洽談區", "category": "教練洽談", "item": "洽談椅無破裂且乾淨"}, {"id": "全外場_42", "tab": "全外場", "area": "洽談區", "category": "教練洽談", "item": "桌面乾淨"}, {"id": "全外場_43", "tab": "全外場", "area": "洽談區", "category": "教練洽談", "item": "牆面乾淨無積塵"}, {"id": "全外場_44", "tab": "全外場", "area": "洽談區", "category": "教練洽談", "item": "Inbody測試機乾淨無積塵"}, {"id": "全外場_45", "tab": "全外場", "area": "洽談區", "category": "教練洽談", "item": "AI櫃台乾淨無積塵"}, {"id": "全外場_46", "tab": "全外場", "area": "洽談區", "category": "教練洽談", "item": "電腦後方無積塵"}, {"id": "全外場_47", "tab": "全外場", "area": "洽談區", "category": "教練洽談", "item": "地板乾淨無灰塵"}, {"id": "有氧教室_01", "tab": "有氧教室", "area": "有氧教室", "category": "地板", "item": "無灰塵"}, {"id": "有氧教室_02", "tab": "有氧教室", "area": "有氧教室", "category": "地板", "item": "有拖地"}, {"id": "有氧教室_03", "tab": "有氧教室", "area": "有氧教室", "category": "地板", "item": "地板不濕滑"}, {"id": "有氧教室_04", "tab": "有氧教室", "area": "有氧教室", "category": "鏡子", "item": "無水漬"}, {"id": "有氧教室_05", "tab": "有氧教室", "area": "有氧教室", "category": "鏡子", "item": "灰塵"}, {"id": "有氧教室_06", "tab": "有氧教室", "area": "有氧教室", "category": "鏡子", "item": "無手印"}, {"id": "有氧教室_07", "tab": "有氧教室", "area": "有氧教室", "category": "燈條", "item": "上方無積塵"}, {"id": "有氧教室_08", "tab": "有氧教室", "area": "有氧教室", "category": "公告", "item": "是否破損"}, {"id": "有氧教室_09", "tab": "有氧教室", "area": "有氧教室", "category": "通風口", "item": "外觀無積塵、乾淨"}, {"id": "有氧教室_10", "tab": "有氧教室", "area": "有氧教室", "category": "牆壁", "item": "無灰塵及汙漬"}, {"id": "有氧教室_11", "tab": "有氧教室", "area": "有氧教室", "category": "天花板", "item": "是否有發霉"}, {"id": "有氧教室_12", "tab": "有氧教室", "area": "有氧教室", "category": "天花板", "item": "管線是否有灰塵"}, {"id": "有氧教室_13", "tab": "有氧教室", "area": "有氧教室", "category": "喇叭", "item": "上方無積塵"}, {"id": "有氧教室_14", "tab": "有氧教室", "area": "有氧教室", "category": "器材室", "item": "監視器無灰塵"}, {"id": "有氧教室_15", "tab": "有氧教室", "area": "有氧教室", "category": "器材室", "item": "地板掃過且整潔"}, {"id": "有氧教室_16", "tab": "有氧教室", "area": "有氧教室", "category": "器材室", "item": "器材歸位且無破損"}, {"id": "有氧教室_17", "tab": "有氧教室", "area": "有氧教室", "category": "逃生梯", "item": "無灰塵且乾淨"}, {"id": "有氧教室_18", "tab": "有氧教室", "area": "有氧教室", "category": "門口", "item": "把手無積塵鏡面乾淨"}, {"id": "有氧教室_19", "tab": "有氧教室", "area": "有氧教室", "category": "瑜珈墊", "item": "放整齊且歸位"}];
+
+    const state = {
+      date: getTodayString(),
+      activeTab: "自由訓練區",
+      search: "",
+      onlyIssue: false,
+      inspector: "",
+      entries: {},
+      updatedAt: "",
+      db: null,
+      cloudReady: false,
+      unsubscribe: null
+    };
+
+    const els = {
+      syncDot: document.getElementById("syncDot"),
+      syncStatus: document.getElementById("syncStatus"),
+      dateInput: document.getElementById("dateInput"),
+      inspectorInput: document.getElementById("inspectorInput"),
+      overallProgress: document.getElementById("overallProgress"),
+      tabProgress: document.getElementById("tabProgress"),
+      issueCount: document.getElementById("issueCount"),
+      lastUpdated: document.getElementById("lastUpdated"),
+      tabBar: document.getElementById("tabBar"),
+      searchInput: document.getElementById("searchInput"),
+      onlyIssueBtn: document.getElementById("onlyIssueBtn"),
+      checkAllTabBtn: document.getElementById("checkAllTabBtn"),
+      clearTabBtn: document.getElementById("clearTabBtn"),
+      itemsContainer: document.getElementById("itemsContainer"),
+      exportCsvBtn: document.getElementById("exportCsvBtn"),
+      toastBox: document.getElementById("toastBox")
+    };
+
+    function getTodayString() {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, "0");
+      const d = String(now.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function nowTimeString() {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      return `${hh}:${mm}`;
+    }
+
+    function showToast(msg) {
+      els.toastBox.textContent = msg;
+      els.toastBox.classList.remove("opacity-0");
+      els.toastBox.classList.add("opacity-100");
+      clearTimeout(showToast._timer);
+      showToast._timer = setTimeout(() => {
+        els.toastBox.classList.remove("opacity-100");
+        els.toastBox.classList.add("opacity-0");
+      }, 1800);
+    }
+
+    function localStorageKey(dateStr) {
+      return `${APP_ID}_${dateStr}`;
+    }
+
+    function loadLocal(dateStr) {
+      try {
+        const raw = localStorage.getItem(localStorageKey(dateStr));
+        if (!raw) return { inspector: "", entries: {}, updatedAt: "" };
+        const parsed = JSON.parse(raw);
+        return {
+          inspector: parsed.inspector || "",
+          entries: parsed.entries || {},
+          updatedAt: parsed.updatedAt || ""
+        };
+      } catch {
+        return { inspector: "", entries: {}, updatedAt: "" };
+      }
+    }
+
+    function saveLocal(dateStr) {
+      try {
+        localStorage.setItem(localStorageKey(dateStr), JSON.stringify({
+          inspector: state.inspector,
+          entries: state.entries,
+          updatedAt: state.updatedAt
+        }));
+      } catch {}
+    }
+
+    function setSyncBadge(mode, text) {
+      els.syncStatus.textContent = text;
+      els.syncDot.className = "inline-block w-2 h-2 rounded-full " + (
+        mode === "ok" ? "bg-emerald-500" :
+        mode === "warn" ? "bg-amber-400" : "bg-rose-500"
+      );
+    }
+
+    async function initFirebase() {
+      const hasConfig = firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("YOUR_");
+      if (!hasConfig) {
+        setSyncBadge("warn", "本機儲存模式（請填入 firebaseConfig 啟用雲端同步）");
+        return;
+      }
+      try {
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        state.db = getFirestore(app);
+        await signInAnonymously(auth);
+        state.cloudReady = true;
+        setSyncBadge("ok", "雲端已即時同步");
+        subscribeDate(state.date);
+      } catch (err) {
+        console.error("Firebase init error:", err);
+        setSyncBadge("err", "雲端連線失敗（已改用本機暫存）");
+      }
+    }
+
+    function subscribeDate(dateStr) {
+      if (typeof state.unsubscribe === "function") {
+        state.unsubscribe();
+        state.unsubscribe = null;
+      }
+
+      const localData = loadLocal(dateStr);
+      state.inspector = localData.inspector;
+      state.entries = localData.entries;
+      state.updatedAt = localData.updatedAt;
+      els.inspectorInput.value = state.inspector;
+      renderAll();
+
+      if (!state.cloudReady || !state.db) return;
+
+      const docRef = doc(state.db, "artifacts", APP_ID, "public", "data", "areaInspections", dateStr);
+      state.unsubscribe = onSnapshot(docRef, (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          state.inspector = data.inspector || "";
+          state.entries = data.entries || {};
+          state.updatedAt = data.updatedAt || "";
+          if (document.activeElement !== els.inspectorInput) {
+            els.inspectorInput.value = state.inspector;
+          }
+          saveLocal(dateStr);
+          renderAll();
+        }
+      }, (err) => {
+        console.error("Snapshot error:", err);
+        setSyncBadge("err", "即時監聽中斷");
+      });
+    }
+
+    async function persistState() {
+      state.updatedAt = `${nowTimeString()} (${state.inspector || "巡檢人員"})`;
+      saveLocal(state.date);
+      renderSummary();
+
+      if (!state.cloudReady || !state.db) return;
+      try {
+        const docRef = doc(state.db, "artifacts", APP_ID, "public", "data", "areaInspections", state.date);
+        await setDoc(docRef, {
+          date: state.date,
+          inspector: state.inspector,
+          entries: state.entries,
+          updatedAt: state.updatedAt
+        }, { merge: true });
+      } catch (err) {
+        console.error("Save error:", err);
+        showToast("雲端寫入失敗，已暫存本機");
+      }
+    }
+
+    function isItemDone(entry) {
+      if (!entry) return false;
+      return Boolean(entry.checked) || Boolean((entry.note || "").trim());
+    }
+
+    function isItemIssue(entry) {
+      return Boolean(entry && (entry.note || "").trim());
+    }
+
+    function getTabItems(tabName) {
+      if (tabName === "全部區域") return CHECKLIST_ITEMS;
+      return CHECKLIST_ITEMS.filter((it) => it.tab === tabName);
+    }
+
+    function renderTabs() {
+      els.tabBar.innerHTML = "";
+      TABS.forEach((tabName) => {
+        const items = getTabItems(tabName);
+        const doneCount = items.filter((it) => isItemDone(state.entries[it.id])).length;
+        const active = state.activeTab === tabName;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `px-2.5 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap border transition shrink-0 ${
+          active
+            ? "bg-emerald-600 text-white border-emerald-600 shadow-2xs"
+            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+        }`;
+        btn.textContent = `${tabName} (${doneCount}/${items.length})`;
+        btn.addEventListener("click", () => {
+          state.activeTab = tabName;
+          renderAll();
+        });
+        els.tabBar.appendChild(btn);
+      });
+    }
+
+    function renderSummary() {
+      const totalDone = CHECKLIST_ITEMS.filter((it) => isItemDone(state.entries[it.id])).length;
+      const tabItems = getTabItems(state.activeTab);
+      const tabDone = tabItems.filter((it) => isItemDone(state.entries[it.id])).length;
+      const totalIssues = CHECKLIST_ITEMS.filter((it) => isItemIssue(state.entries[it.id])).length;
+
+      els.overallProgress.textContent = `${totalDone} / ${CHECKLIST_ITEMS.length}`;
+      els.tabProgress.textContent = `${tabDone} / ${tabItems.length}`;
+      els.issueCount.textContent = String(totalIssues);
+      els.lastUpdated.textContent = state.updatedAt ? `更新 ${state.updatedAt}` : "尚未更新";
+      renderTabs();
+    }
+
+    function renderItems() {
+      const q = state.search.trim().toLowerCase();
+      const baseList = getTabItems(state.activeTab);
+      const filtered = baseList.filter((it) => {
+        const entry = state.entries[it.id] || {};
+        if (state.onlyIssue && !isItemIssue(entry)) return false;
+        if (!q) return true;
+        return (
+          it.area.toLowerCase().includes(q) ||
+          it.category.toLowerCase().includes(q) ||
+          it.item.toLowerCase().includes(q) ||
+          (entry.note || "").toLowerCase().includes(q)
+        );
+      });
+
+      els.itemsContainer.innerHTML = "";
+      if (filtered.length === 0) {
+        els.itemsContainer.innerHTML = `
+          <div class="bg-white border border-slate-200 rounded-xl p-6 text-center text-xs text-slate-400">
+            目前條件下沒有符合的巡檢項目
+          </div>
+        `;
+        return;
+      }
+
+      filtered.forEach((it) => {
+        const entry = state.entries[it.id] || { checked: false, note: "" };
+        const checked = Boolean(entry.checked);
+        const note = entry.note || "";
+        const hasIssue = Boolean(note.trim());
+
+        const card = document.createElement("div");
+        card.className = `bg-white border rounded-xl px-2.5 py-2 transition shadow-2xs ${
+          hasIssue
+            ? "border-rose-300 bg-rose-50/35"
+            : checked
+            ? "border-emerald-300 bg-emerald-50/25"
+            : "border-slate-200"
+        }`;
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-1 text-[11px] leading-tight mb-0.5">
+                <span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">${it.tab}</span>
+                ${it.area && it.area !== it.tab ? `<span class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-medium">${it.area}</span>` : ""}
+                <span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 font-semibold">${it.category}</span>
+              </div>
+              <div class="text-xs sm:text-sm font-bold text-slate-900 leading-snug">${it.item}</div>
+            </div>
+            <button type="button" data-action="toggle" data-id="${it.id}" class="px-2.5 py-1.5 rounded-lg text-xs font-bold border transition shrink-0 ${
+              checked
+                ? "bg-emerald-600 text-white border-emerald-600"
+                : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+            }">
+              ${checked ? "✓ 已確認" : "打 V"}
+            </button>
+          </div>
+          <div class="mt-1.5">
+            <input type="text" data-action="note" data-id="${it.id}" value="${escapeAttr(note)}" placeholder="正常留白；異常或備註請填寫..." class="w-full px-2.5 py-1 rounded-lg border text-xs focus:outline-none ${
+              hasIssue
+                ? "border-rose-300 bg-white text-rose-900 focus:border-rose-500"
+                : "border-slate-200 bg-slate-50/70 text-slate-800 focus:bg-white focus:border-emerald-500"
+            }" />
+          </div>
+        `;
+
+        const toggleBtn = card.querySelector('[data-action="toggle"]');
+        toggleBtn.addEventListener("click", async () => {
+          const cur = state.entries[it.id] || { checked: false, note: "" };
+          state.entries[it.id] = {
+            checked: !cur.checked,
+            note: cur.note || ""
+          };
+          renderAll();
+          await persistState();
+        });
+
+        const noteInput = card.querySelector('[data-action="note"]');
+        noteInput.addEventListener("change", async (e) => {
+          const cur = state.entries[it.id] || { checked: false, note: "" };
+          state.entries[it.id] = {
+            checked: cur.checked,
+            note: e.target.value
+          };
+          renderAll();
+          await persistState();
+        });
+
+        els.itemsContainer.appendChild(card);
+      });
+    }
+
+    function escapeAttr(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function renderAll() {
+      renderSummary();
+      renderItems();
+    }
+
+    function exportCsv() {
+      const headers = ["巡檢日期", "巡檢人員", "分頁", "區域", "種類", "檢查細項", "已確認打V", "異常/備註"];
+      const rows = [headers];
+      CHECKLIST_ITEMS.forEach((it) => {
+        const entry = state.entries[it.id] || {};
+        rows.push([
+          state.date,
+          state.inspector || "",
+          it.tab,
+          it.area,
+          it.category,
+          it.item,
+          entry.checked ? "V" : "",
+          entry.note || ""
+        ]);
+      });
+      const csvContent = "﻿" + rows.map((r) =>
+        r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
+      ).join("
+");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `區域環境巡檢_${state.date}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("已匯出 CSV 報表");
+    }
+
+    els.dateInput.value = state.date;
+    els.dateInput.addEventListener("change", (e) => {
+      if (!e.target.value) return;
+      state.date = e.target.value;
+      subscribeDate(state.date);
+    });
+
+    els.inspectorInput.addEventListener("change", async (e) => {
+      state.inspector = e.target.value.trim();
+      await persistState();
+    });
+
+    els.searchInput.addEventListener("input", (e) => {
+      state.search = e.target.value;
+      renderItems();
+    });
+
+    els.onlyIssueBtn.addEventListener("click", () => {
+      state.onlyIssue = !state.onlyIssue;
+      els.onlyIssueBtn.className = state.onlyIssue
+        ? "px-2.5 py-1.5 rounded-lg border border-rose-500 bg-rose-50 text-xs font-semibold text-rose-700 transition"
+        : "px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition";
+      renderItems();
+    });
+
+    els.checkAllTabBtn.addEventListener("click", async () => {
+      const targetItems = getTabItems(state.activeTab);
+      targetItems.forEach((it) => {
+        const cur = state.entries[it.id] || { checked: false, note: "" };
+        state.entries[it.id] = { checked: true, note: cur.note || "" };
+      });
+      renderAll();
+      await persistState();
+      showToast(`已將「${state.activeTab}」全數打 V`);
+    });
+
+    els.clearTabBtn.addEventListener("click", async () => {
+      const targetItems = getTabItems(state.activeTab);
+      targetItems.forEach((it) => {
+        delete state.entries[it.id];
+      });
+      renderAll();
+      await persistState();
+      showToast(`已清除「${state.activeTab}」紀錄`);
+    });
+
+    els.exportCsvBtn.addEventListener("click", exportCsv);
+
+    subscribeDate(state.date);
+    initFirebase();
+  </script>
+</body>
+</html>
